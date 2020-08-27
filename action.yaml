@@ -1,0 +1,160 @@
+name: Monitor Loadbalancer
+description: 'Monitor Loadbalancer'
+
+####----------------------------------------------------------------------------
+inputs:
+  aws-default-profile:
+    description: 'AWS Default Profile'
+    required: false
+    default: default
+  target-loadbalancer:
+    description: 'Define Target LoadBalancer'
+    required: false
+    default: false
+  target-region:
+    description: 'Define Default Target-Region'
+    required: false
+    default: false
+  target-workspace:
+    description: 'Define Target Workspace'
+    required: false
+    default: false
+  loadbalancer-interfaces:
+    description: 'LoadBalancer Network-Interfaces'
+    required: false
+    default: false
+  loadbalancer-configuration:
+    description: 'LoadBalancer Network-Configuration'
+    required: false
+    default: false
+  loadbalancer-status:
+    description: 'LoadBalancer System-Status'
+    required: false
+    default: false
+####----------------------------------------------------------------------------
+##  outputs:
+####----------------------------------------------------------------------------
+runs:
+  using: "composite"
+  steps:
+    ####------------------------------------------------------------------------
+    ## Monitor Loadbalancer
+    - name: Monitor Loadbalancer
+      id: monitor-loadbalancer
+      shell: bash
+      run: |
+        ####--------------------------------------------------------------------
+        target_workspace="${{ inputs.target-workspace }}" ;
+        [[ "${target_workspace}" == false ]] && {
+            target_workspace="${TARGET_WORKSPACE}" ;
+          } ;
+        ####--------------------------------------------------------------------
+        ## Inspecting Elastic LoadBalancer
+        loadbalancer_name="${{ inputs.target-loadbalancer }}" ;
+        [[ "${loadbalancer_name}" == false ]] && {
+            loadbalancer_name="${target_workspace}-nginx-elb-$(
+                terraform output resources_index
+              )" ;
+          } ;
+        ####--------------------------------------------------------------------
+        target_region="${{ inputs.target-region }}" ;
+        [[ "${target_region}" == false ]] && {
+            target_region="${AWS_DEFAULT_REGION}" ;
+          } ;
+        if [[ ${#target_region} -eq 0 ]]; then
+          echo  -e "Warning: Target Loadbalancer Region is invalid! " ;
+                exit -1;
+        fi ;
+        ####--------------------------------------------------------------------
+        if [[ "${{ inputs.loadbalancer-status }}" == true ]]; then
+          echo -e "\nScanning Instances State [ ${loadbalancer_name} ] ..." ;
+          aws --profile ${{ inputs.aws-default-profile }} \
+              --region ${target_region} \
+              elb describe-instance-health \
+              --load-balancer-name ${loadbalancer_name} ;
+          paused=5 ; time {
+              while [[
+                  `aws --profile ${{ inputs.aws-default-profile }} \
+                       --region ${target_region} \
+                       elb describe-instance-health \
+                       --load-balancer-name ${loadbalancer_name} \
+                       --query InstanceStates[].State \
+                       --output text \
+                   | sed -e 's/InService//g' -e 's/\([[:blank:]]\)\{1,\}//' \
+                   | egrep -c "OutOfService|Unknown" 2>/dev/null` -gt 0
+                ]]; do
+                sleep ${paused} ;
+              done ;
+            }; sleep ${paused} ;
+          declare -a loadbalancer_publicips=($(
+              aws --profile ${{ inputs.aws-default-profile }} \
+                  --region ${target_region} \
+                  ec2 describe-network-interfaces \
+                  --filters Name=description,Values="ELB ${loadbalancer_name}" \
+                  --query 'NetworkInterfaces[*].Association.PublicIp' \
+                  --output text
+            )) ;
+          if [[ ${#loadbalancer_publicips[@]} -eq 0 ]]; then
+            echo  -e "\nWarning: ElasticLoadbalancer Public-IPs [0]! " ;
+                  exit -1 ;
+          fi ;
+          loadbalancer_publicip="${loadbalancer_publicips[0]}" ;
+          echo -en "\nFetching Elastic Load Balancer Public-IPs ... " ;
+          echo -e "[ $(echo -e ${loadbalancer_publicips[*]}|tr ' ' ',') ]" ;
+          ####----------------------------------------------------------------------------
+          #### echo -e "Target Service: '${loadbalancer_name}' [${loadbalancer_publicip}]\n" ;
+          #### curl -v --head http://${loadbalancer_publicip} 2>/dev/null ;
+          loadbalancer_dnsname="$(host ${loadbalancer_publicip} | cut -d ' ' -f5)" ;
+          echo -e "\nTarget Service: ${loadbalancer_dnsname}\n" ;
+          curl -v --head http://${loadbalancer_dnsname} 2>/dev/null ;
+        fi ;
+        ####----------------------------------------------------------------------------
+        if [[ "${{ inputs.loadbalancer-interfaces }}" == true ]]; then
+          echo -e "\nElastic LoadBalancer Network Interfaces:" ;
+          aws --profile ${{ inputs.aws-default-profile }} \
+              --region ${target_region} \
+              ec2 describe-network-interfaces \
+              --filters Name=description,Values="ELB ${loadbalancer_name}" ;
+        fi ;
+        ####----------------------------------------------------------------------------
+        if [[ "${{ inputs.loadbalancer-configuration }}" == true ]]; then
+          ## Describing Elastic LoadBalancer
+          echo -e "\nDescribing Elastic Load Balancer configuration:" ;
+          aws --profile ${{ inputs.aws-default-profile }} \
+              --region ${target_region} \
+              elb describe-load-balancers \
+              --load-balancer-name ${loadbalancer_name} ;
+        fi ;
+        ####--------------------------------------------------------------------
+        eval "echo '::set-env name=LOADBALANCER_NAME::${loadbalancer_name}'" ;
+        ####--------------------------------------------------------------------
+        echo -e "\nCompleted! " ;
+
+## Evaluating Elastic LoadBalancer Response
+## HTTP/1.1 200 OK
+## Accept-Ranges: bytes
+## Content-Length: 294
+## Content-Type: text/html
+## Date: Sun, 16 Aug 2020 23:56:39 GMT
+## ETag: "5f39c185-126"
+## Last-Modified: Sun, 16 Aug 2020 23:30:13 GMT
+## Server: nginx/1.16.1
+## Connection: keep-alive
+
+## Warning: Discarding this option (not efficient)
+## declare -a loadbalancer_publicdns=($(
+##     aws --profile ${AWS_DEFAULT_PROFILE} \
+##         --region ${AWS_DEFAULT_REGION} \
+##         elb describe-load-balancers \
+##         --load-balancer-name ${loadbalancer_name} \
+##         --query 'LoadBalancerDescriptions[].DNSName' \
+##         --output text
+##   )) ;
+## declare -a loadbalancer_publicips=($(
+##     host ${loadbalancer_publicdns} | cut -d ' ' -f4
+##   )) ;
+## if [[ ${#loadbalancer_publicips[@]} -gt 0 ]]; then
+##   echo -e "\nTarget Service: '${loadbalancer_publicips[0]}'\n" ;
+##   curl -v --head http://${loadbalancer_publicips[0]} 2>/dev/null ;
+## fi ;
+

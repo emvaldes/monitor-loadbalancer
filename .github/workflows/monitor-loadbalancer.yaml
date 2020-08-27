@@ -1,0 +1,133 @@
+name: GitHub Actions - Monitor Loadbalancer
+on:
+
+####----------------------------------------------------------------------------
+  workflow_dispatch:
+    name: Manual Deployment
+    description: 'Triggering Manual Deployment'
+    inputs:
+      target-loadbalancer:
+        description: 'Target Loadbalancer (Short-Name)'
+        required: true
+        default: ''
+      target-region:
+        description: 'Target/Default AWS Region'
+        required: true
+        default: false
+      logLevel:
+        description: 'Log level'
+        required: true
+        default: 'warning'
+      tags:
+        description: 'Monitor Loadbalancer'
+####----------------------------------------------------------------------------
+  push:
+    branches: [ master ]
+    paths:
+      - action.yaml
+####----------------------------------------------------------------------------
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_DEFAULT_ACCOUNT: ${{ secrets.AWS_DEFAULT_ACCOUNT }}
+  AWS_DEFAULT_PROFILE: ${{ secrets.AWS_DEFAULT_PROFILE }}
+  AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  ## DEPLOY_TERRAFORM
+  ## DESTROY_TERRAFORM
+  ## DEVOPS_ASSUMEROLE_POLICY
+  ## DEVOPS_BOUNDARIES_POLICY
+  ## DEVOPS_ACCESS_POLICY
+  DEVOPS_ACCESS_ROLE: ${{ secrets.DEVOPS_ACCESS_ROLE }}
+  DEVOPS_ACCOUNT_NAME: ${{ secrets.DEVOPS_ACCOUNT_NAME }}
+  ## INSPECT_DEPLOYMENT
+  ## PRIVATE_KEYPAIR_FILE
+  ## PRIVATE_KEYPAIR_NAME
+  ## PRIVATE_KEYPAIR_SECRET
+  ## PROVISION_TERRAFORM
+  TARGET_WORKSPACE: ${{ secrets.TARGET_WORKSPACE }}
+  ## UPDATE_PYTHON_LATEST
+  ## UPDATE_SYSTEM_LATEST
+  ##
+  TARGET_LOADBALANCER: ${{ secrets.TARGET_LOADBALANCER }}
+  ## dev-nginx-elb-72173-1145861171.us-east-1.elb.amazonaws.com
+####----------------------------------------------------------------------------
+jobs:
+  monitor-loadbalancer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+####----------------------------------------------------------------------------
+      ## Environment Variables
+      - name: Environment Variables
+        id: environment-variables
+        run: |
+          target_loadbalancer="${{ github.event.inputs.target-loadbalancer }}" ;
+          if [[ ${#target_loadbalancer} == '' ]]; then
+                  echo -e "Warning: Target LoadBalancer is invalid! " ;
+                  exit -1 ;
+            else  eval "echo '::set-env name=TARGET_LOADBALANCER::${target_loadbalancer}'" ;
+          fi ;
+          if [[ "${{ github.event.inputs.target-region }}" != false ]]; then
+            echo '::set-env name=TARGET_REGION::${{ github.event.inputs.target-region }}' ;
+          fi ;
+          eval "echo '::set-env name=SESSION_TIMESTAMP::TerraformPipeline--$(date +"%Y%m%d%H%M%S")'" ;
+          echo '::set-env name=AWS_ACCESS_KEY_ID::${{ secrets.AWS_ACCESS_KEY_ID }}'
+          echo '::set-env name=AWS_SECRET_ACCESS_KEY::${{ secrets.AWS_SECRET_ACCESS_KEY }}'
+####----------------------------------------------------------------------------
+      ## System Requirements
+      - name: System Requirements
+        uses: emvaldes/system-requirements@master
+        id: system-requirements
+        with:
+          install-awscli-tool: true
+          install-default-tools: true
+          update-operating-system: false
+          update-python-version: true
+        continue-on-error: false
+####----------------------------------------------------------------------------
+      ## Requesting Credentials
+      - name: Requesting Credentials
+        uses: emvaldes/generate-credentials@master
+        id: request-credentials
+        with:
+          aws-access-key-id: ${AWS_ACCESS_KEY_ID}
+          aws-default-account: ${AWS_DEFAULT_ACCOUNT}
+          aws-default-profile: ${AWS_DEFAULT_PROFILE}
+          aws-default-region: ${AWS_DEFAULT_REGION}
+          aws-secret-access-key: ${AWS_SECRET_ACCESS_KEY}
+          devops-access-role: ${DEVOPS_ACCESS_ROLE}
+          devops-account-name: ${DEVOPS_ACCOUNT_NAME}
+          session-timestamp: ${SESSION_TIMESTAMP}
+        continue-on-error: false
+####----------------------------------------------------------------------------
+      ## Monitoring Loadbalancer
+      - name: Monitoring Loadbalancer
+        uses: emvaldes/monitor-loadbalancer@master
+        id: monitor-loadbalancer
+        with:
+          target-region: ${TARGET_REGION}
+          target-loadbalancer: ${TARGET_LOADBALANCER}
+          loadbalancer-status: true
+        continue-on-error: false
+####----------------------------------------------------------------------------
+      ## LoadBalancer Network-Interfaces
+      - name: LoadBalancer Interfaces
+        uses: emvaldes/monitor-loadbalancer@master
+        id: loadbalancer-interfaces
+        with:
+          target-region: ${TARGET_REGION}
+          target-loadbalancer: ${TARGET_LOADBALANCER}
+          loadbalancer-interfaces: true
+        continue-on-error: false
+####----------------------------------------------------------------------------
+      ## LoadBalancer Network-Configuration
+      - name: LoadBalancer Configuration
+        uses: emvaldes/monitor-loadbalancer@master
+        id: loadbalancer-configuration
+        with:
+          target-region: ${TARGET_REGION}
+          target-loadbalancer: ${TARGET_LOADBALANCER}
+          loadbalancer-configuration: true
+        continue-on-error: false
+####----------------------------------------------------------------------------
