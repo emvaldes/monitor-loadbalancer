@@ -126,7 +126,7 @@ runs:
               --load-balancer-name ${loadbalancer_name} ;
         fi ;
         ####--------------------------------------------------------------------
-        eval "echo '::set-env name=LOADBALANCER_NAME::${loadbalancer_name}'" ;
+        echo "LOADBALANCER_NAME=${loadbalancer_name}" >> ${GITHUB_ENV} ;
         ####--------------------------------------------------------------------
         echo -e "\nCompleted! " ;
 
@@ -157,4 +157,3 @@ runs:
 ##   echo -e "\nTarget Service: '${loadbalancer_publicips[0]}'\n" ;
 ##   curl -v --head http://${loadbalancer_publicips[0]} 2>/dev/null ;
 ## fi ;
-
